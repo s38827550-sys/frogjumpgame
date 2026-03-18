@@ -61,12 +61,16 @@ class GameEngine:
 
     def handle_name_entry_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if OK_BTN_RECT.collidepoint(event.pos) or EXIT_BTN_RECT.collidepoint(event.pos): self.confirm_nickname()
+            if OK_BTN_RECT.collidepoint(event.pos):
+                self.confirm_nickname()
+            elif EXIT_BTN_RECT.collidepoint(event.pos):
+                pygame.quit(); sys.exit()
         elif event.type == pygame.TEXTINPUT:
             if len(self.name_text) < 16: self.name_text += event.text
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE: self.name_text = self.name_text[:-1]
-            elif event.key in (pygame.K_RETURN, pygame.K_ESCAPE): self.confirm_nickname()
+            elif event.key == pygame.K_RETURN: self.confirm_nickname()
+            elif event.key == pygame.K_ESCAPE: pygame.quit(); sys.exit()
 
     def confirm_nickname(self):
         self.nickname = self.name_text.strip() or "PLAYER"
