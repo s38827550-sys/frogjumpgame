@@ -21,14 +21,14 @@ class GameEngine:
         self.big_font = self.assets.get_font(80)
         self.small_font = self.assets.get_font(24)
         self.profile = load_profile()
-        self.nickname = self.profile["nickname"].strip() if self.profile else "PLAYER"
+        self.nickname = self.profile.get("nickname", "PLAYER").strip() if self.profile else "PLAYER"
         self.state = STATE_PROLOGUE if self.profile else STATE_NAME_ENTRY
         self.reset_round_vars()
         self.init_name_entry()
         self.fade_alpha, self.fade_speed, self.fade_done_time = 255, 3, None
         self.score_uploaded, self.upload_status, self.upload_status_time = False, "", 0
         try: flush_pending(force=True)
-        except: pass
+        except Exception as e: print(f"Pending sync failed: {e}")
 
     def reset_round_vars(self):
         self.score = 0

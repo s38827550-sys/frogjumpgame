@@ -8,7 +8,11 @@ def load_profile():
         return None
     try:
         with open(PROFILE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            # 닉네임 키가 없으면 유효하지 않은 프로필로 간주
+            if not isinstance(data, dict) or "nickname" not in data:
+                return None
+            return data
     except Exception:
         return None
 
