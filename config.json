@@ -1,3 +1,5 @@
 {
-  "api_base": "https://frogjump-leaderboard.onrender.com"
+  "api_base": "https://frogjump-leaderboard.onrender.com",
+  "supabase_url": "https://cvojxertqjhfiqnsmbvg.supabase.co",
+  "supabase_anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2b2p4ZXJ0cWpoZmlxbnNtYnZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MTA1NTMsImV4cCI6MjA4OTQ4NjU1M30.EY1llaplVsKg85RzLu7idsOvkDcIsNGHHQuuk4bL39s"
 }

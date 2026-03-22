@@ -4,7 +4,6 @@ import sys
 import pygame
 
 def get_base_dir() -> str:
-    # core 폴더 안에 있으므로, 한 단계 위인 root를 반환
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,13 +28,14 @@ GRAVITY = 1.2
 JUMP_SPEED = 16
 
 # 게임 상태
+STATE_LOGIN = "login"          # 새로 추가
 STATE_NAME_ENTRY = "name_entry"
 STATE_PROLOGUE = "prologue"
 STATE_START = "start"
 STATE_GAME = "game"
 STATE_GAMEOVER = "gameover"
 
-# UI 좌표 (스케일링 적용 헬퍼)
+# UI 좌표 헬퍼
 def Sx(x): return int(round(x * SX))
 def Sy(y): return int(round(y * SY))
 def scale_rect(x, y, w, h):
@@ -44,3 +44,9 @@ def scale_rect(x, y, w, h):
 NAME_BOX_RECT = scale_rect(333, 316, 532, 50)
 OK_BTN_RECT   = scale_rect(288, 432, 262, 60)
 EXIT_BTN_RECT = scale_rect(621, 433, 273, 57)
+
+# 로그인 화면 UI 좌표 (간격 넓게)
+LOGIN_ID_BOX    = scale_rect(400, 230, 400, 50)
+LOGIN_PW_BOX    = scale_rect(400, 340, 400, 50)
+LOGIN_BTN_RECT  = scale_rect(400, 430, 400, 55)
+LOGIN_EXIT_RECT = scale_rect(400, 500, 400, 45)

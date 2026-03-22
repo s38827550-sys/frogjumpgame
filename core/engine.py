@@ -1,10 +1,10 @@
-# core/engine.py (Final Polished Version)
+# core/engine.py
 import pygame, sys, os, math
 from .constants import *
 from .utils import *
 from .assets import AssetManager
 from .models import Fly
-from .network import upload_score, flush_pending
+from .network import upload_score, flush_pending, login_with_supabase, load_web_token, logout
 
 class GameEngine:
     def __init__(self):
@@ -20,11 +20,31 @@ class GameEngine:
         self.font = self.assets.get_font(36)
         self.big_font = self.assets.get_font(80)
         self.small_font = self.assets.get_font(24)
-        self.profile = load_profile()
-        self.nickname = self.profile.get("nickname", "PLAYER").strip() if self.profile else "PLAYER"
-        self.state = STATE_PROLOGUE if self.profile else STATE_NAME_ENTRY
+
+        # 배경 이미지 로드 (웹페이지랑 같은 배경)
+        try:
+            bg_path = os.path.join(ASSETS_DIR, "background_mygame2.png")
+            self.login_bg = pygame.image.load(bg_path).convert()
+            self.login_bg = pygame.transform.scale(self.login_bg, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except:
+            self.login_bg = None
+
+        # 로그인 상태 변수
+        self.login_id = ""
+        self.login_pw = ""
+        self.login_active_field = "id"  # "id" or "pw"
+        self.login_error = ""
+        self.login_loading = False
+
+        # 저장된 토큰 확인
+        token = load_web_token()
+        if token and token.get("access_token"):
+            self.nickname = token.get("nickname", "PLAYER")
+            self.state = STATE_PROLOGUE
+        else:
+            self.state = STATE_LOGIN
+
         self.reset_round_vars()
-        self.init_name_entry()
         self.fade_alpha, self.fade_speed, self.fade_done_time = 255, 3, None
         self.score_uploaded, self.upload_status, self.upload_status_time = False, "", 0
         try: flush_pending(force=True)
@@ -44,37 +64,70 @@ class GameEngine:
         self.character_img = self.assets.frog_normal
         self.ranking, self.score_uploaded, self.upload_status = [], False, ""
 
-    def init_name_entry(self):
-        self.name_text = ""
-        if self.state == STATE_NAME_ENTRY:
-            pygame.key.start_text_input(); pygame.key.set_text_input_rect(NAME_BOX_RECT)
-
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT: pygame.quit(); sys.exit()
-            if self.state == STATE_NAME_ENTRY: self.handle_name_entry_event(event)
+            if self.state == STATE_LOGIN: self.handle_login_event(event)
             elif self.state == STATE_START and event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
                 self.state = STATE_GAME; self.reset_round_vars()
             elif self.state == STATE_GAME: self.handle_game_event(event)
             elif self.state == STATE_GAMEOVER and event.type == pygame.KEYDOWN and event.key == pygame.K_r:
                 self.state = STATE_GAME; self.reset_round_vars()
 
-    def handle_name_entry_event(self, event):
+    def handle_login_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if OK_BTN_RECT.collidepoint(event.pos):
-                self.confirm_nickname()
-            elif EXIT_BTN_RECT.collidepoint(event.pos):
+            # 필드 클릭 감지
+            if LOGIN_ID_BOX.collidepoint(event.pos):
+                self.login_active_field = "id"
+            elif LOGIN_PW_BOX.collidepoint(event.pos):
+                self.login_active_field = "pw"
+            elif LOGIN_BTN_RECT.collidepoint(event.pos):
+                self.try_login()
+            elif LOGIN_EXIT_RECT.collidepoint(event.pos):
                 pygame.quit(); sys.exit()
-        elif event.type == pygame.TEXTINPUT:
-            if len(self.name_text) < 16: self.name_text += event.text
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_BACKSPACE: self.name_text = self.name_text[:-1]
-            elif event.key == pygame.K_RETURN: self.confirm_nickname()
-            elif event.key == pygame.K_ESCAPE: pygame.quit(); sys.exit()
 
-    def confirm_nickname(self):
-        self.nickname = self.name_text.strip() or "PLAYER"
-        save_profile(self.nickname); pygame.key.stop_text_input(); self.state = STATE_PROLOGUE
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN:
+                if self.login_active_field == "id":
+                    self.login_active_field = "pw"
+                else:
+                    self.try_login()
+            elif event.key == pygame.K_TAB:
+                self.login_active_field = "pw" if self.login_active_field == "id" else "id"
+            elif event.key == pygame.K_BACKSPACE:
+                if self.login_active_field == "id":
+                    self.login_id = self.login_id[:-1]
+                else:
+                    self.login_pw = self.login_pw[:-1]
+            elif event.key == pygame.K_ESCAPE:
+                pygame.quit(); sys.exit()
+
+        elif event.type == pygame.TEXTINPUT:
+            if self.login_active_field == "id" and len(self.login_id) < 20:
+                self.login_id += event.text
+            elif self.login_active_field == "pw" and len(self.login_pw) < 30:
+                self.login_pw += event.text
+
+    def try_login(self):
+        if not self.login_id.strip() or not self.login_pw.strip():
+            self.login_error = "Please enter ID and Password"
+            return
+        self.login_error = "Logging in..."
+        self.login_loading = True
+
+        result = login_with_supabase(self.login_id.strip(), self.login_pw.strip())
+
+        self.login_loading = False
+        if result is None:
+            self.login_error = "Invalid ID or Password"
+        elif result.get("error") == "deleted":
+            self.login_error = "This account has been deleted"
+        else:
+            self.nickname = result.get("nickname", self.login_id)
+            self.login_error = ""
+            self.state = STATE_PROLOGUE
+            self.fade_alpha = 255
+            self.fade_done_time = None
 
     def handle_game_event(self, event):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and not self.jumping:
@@ -122,23 +175,112 @@ class GameEngine:
         self.state = STATE_GAMEOVER
 
     def draw(self):
-        if self.state == STATE_NAME_ENTRY: self.draw_name_entry()
+        if self.state == STATE_LOGIN: self.draw_login()
         elif self.state == STATE_PROLOGUE: self.draw_prologue()
         elif self.state == STATE_START: self.screen.blit(self.assets.start_bg, (0, 0))
         elif self.state in (STATE_GAME, STATE_GAMEOVER): self.draw_game_main()
         pygame.display.update()
 
-    def draw_name_entry(self):
-        self.screen.blit(self.assets.name_entry_bg, (0, 0))
-        caret = "|" if (pygame.time.get_ticks() // 350) % 2 == 0 else ""
-        show_text = (self.name_text + caret) if self.name_text else ("Enter Name..." + caret)
-        txt_surf = self.font.render(show_text, True, (255, 255, 255) if self.name_text else (220, 220, 220))
-        self.screen.blit(txt_surf, txt_surf.get_rect(midleft=(NAME_BOX_RECT.left + 20, NAME_BOX_RECT.centery)))
+    def draw_login(self):
+        # 배경
+        if self.login_bg:
+            self.screen.blit(self.login_bg, (0, 0))
+        else:
+            self.screen.fill((10, 22, 40))
+
+        # 어두운 오버레이
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 120))
+        self.screen.blit(overlay, (0, 0))
+
+        # 개구리 이미지 + 타이틀 (나란히 배치)
+        frog_scaled = pygame.transform.scale(self.assets.frog_normal, (90, 90))
+        title_surf = self.big_font.render("Frog Jump", True, (245, 200, 66))
+        shadow_surf = self.big_font.render("Frog Jump", True, (0, 0, 0))
+
+        total_w = frog_scaled.get_width() + 20 + title_surf.get_width()
+        start_x = SCREEN_WIDTH // 2 - total_w // 2
+        title_y = Sy(80)
+
+        # 그림자 + 타이틀
+        self.screen.blit(shadow_surf, (start_x + frog_scaled.get_width() + 20 + 3, title_y + 3))
+        self.screen.blit(title_surf, (start_x + frog_scaled.get_width() + 20, title_y))
+        # 개구리 이미지 (세로 중앙 맞춤)
+        frog_y = title_y + title_surf.get_height() // 2 - frog_scaled.get_height() // 2
+        self.screen.blit(frog_scaled, (start_x, frog_y))
+
+        # 로그인 박스
+        box_w, box_h = Sx(440), Sy(340)
+        box_x = SCREEN_WIDTH // 2 - box_w // 2
+        box_y = SCREEN_HEIGHT // 2 - box_h // 2 + Sy(40)
+
+        box_surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        pygame.draw.rect(box_surf, (0, 0, 0, 180), (0, 0, box_w, box_h), border_radius=16)
+        pygame.draw.rect(box_surf, (74, 124, 63, 255), (0, 0, box_w, box_h), width=2, border_radius=16)
+        self.screen.blit(box_surf, (box_x, box_y))
+
+        # 아이디 라벨 (영문)
+        id_label = self.small_font.render("ID", True, (180, 180, 180))
+        self.screen.blit(id_label, (LOGIN_ID_BOX.x, LOGIN_ID_BOX.y - Sy(28)))
+
+        # 아이디 입력창
+        id_active = self.login_active_field == "id"
+        id_border_color = (74, 124, 63) if id_active else (60, 60, 60)
+        pygame.draw.rect(self.screen, (30, 30, 30), LOGIN_ID_BOX, border_radius=8)
+        pygame.draw.rect(self.screen, id_border_color, LOGIN_ID_BOX, width=2, border_radius=8)
+        caret = "|" if id_active and (pygame.time.get_ticks() // 500) % 2 == 0 else ""
+        id_surf = self.font.render(self.login_id + caret, True, (255, 255, 255))
+        # 텍스트가 박스 넘치지 않도록 clip
+        clip_rect = pygame.Rect(LOGIN_ID_BOX.x + 12, LOGIN_ID_BOX.y, LOGIN_ID_BOX.w - 20, LOGIN_ID_BOX.h)
+        self.screen.set_clip(clip_rect)
+        self.screen.blit(id_surf, (LOGIN_ID_BOX.x + 12, LOGIN_ID_BOX.y + LOGIN_ID_BOX.h // 2 - id_surf.get_height() // 2))
+        self.screen.set_clip(None)
+
+        # 비밀번호 라벨 (영문)
+        pw_label = self.small_font.render("Password", True, (180, 180, 180))
+        self.screen.blit(pw_label, (LOGIN_PW_BOX.x, LOGIN_PW_BOX.y - Sy(28)))
+
+        # 비밀번호 입력창
+        pw_active = self.login_active_field == "pw"
+        pw_border_color = (74, 124, 63) if pw_active else (60, 60, 60)
+        pygame.draw.rect(self.screen, (30, 30, 30), LOGIN_PW_BOX, border_radius=8)
+        pygame.draw.rect(self.screen, pw_border_color, LOGIN_PW_BOX, width=2, border_radius=8)
+        pw_caret = "|" if pw_active and (pygame.time.get_ticks() // 500) % 2 == 0 else ""
+        pw_display = "*" * len(self.login_pw) + pw_caret
+        pw_surf = self.font.render(pw_display, True, (255, 255, 255))
+        clip_rect = pygame.Rect(LOGIN_PW_BOX.x + 12, LOGIN_PW_BOX.y, LOGIN_PW_BOX.w - 20, LOGIN_PW_BOX.h)
+        self.screen.set_clip(clip_rect)
+        self.screen.blit(pw_surf, (LOGIN_PW_BOX.x + 12, LOGIN_PW_BOX.y + LOGIN_PW_BOX.h // 2 - pw_surf.get_height() // 2))
+        self.screen.set_clip(None)
+
+        # 에러 메시지
+        if self.login_error:
+            err_color = (122, 232, 255) if self.login_error == "Logging in..." else (255, 100, 100)
+            err_surf = self.small_font.render(self.login_error, True, err_color)
+            self.screen.blit(err_surf, err_surf.get_rect(center=(SCREEN_WIDTH // 2, LOGIN_BTN_RECT.y - Sy(18))))
+
+        # 로그인 버튼
+        btn_hover = LOGIN_BTN_RECT.collidepoint(pygame.mouse.get_pos())
+        btn_color = (90, 156, 79) if btn_hover else (74, 124, 63)
+        pygame.draw.rect(self.screen, btn_color, LOGIN_BTN_RECT, border_radius=10)
+        pygame.draw.rect(self.screen, (100, 180, 90), LOGIN_BTN_RECT, width=1, border_radius=10)
+        btn_surf = self.font.render("Login", True, (255, 255, 255))
+        self.screen.blit(btn_surf, btn_surf.get_rect(center=LOGIN_BTN_RECT.center))
+
+        # 종료 버튼
+        exit_surf = self.small_font.render("Exit  (ESC)", True, (150, 150, 150))
+        self.screen.blit(exit_surf, exit_surf.get_rect(center=LOGIN_EXIT_RECT.center))
+
+        # 안내 문구
+        guide_surf = self.small_font.render("Please sign up on the website first", True, (120, 120, 120))
+        self.screen.blit(guide_surf, guide_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - Sy(30))))
 
     def draw_prologue(self):
         self.screen.blit(self.assets.prologue_bg, (0, 0))
-        fade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT)); fade.fill((0,0,0)); fade.set_alpha(self.fade_alpha)
-        self.screen.blit(fade, (0,0))
+        fade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        fade.fill((0, 0, 0))
+        fade.set_alpha(self.fade_alpha)
+        self.screen.blit(fade, (0, 0))
         self.fade_alpha = max(0, self.fade_alpha - self.fade_speed)
         if self.fade_alpha == 0:
             if not self.fade_done_time: self.fade_done_time = pygame.time.get_ticks()
@@ -161,7 +303,8 @@ class GameEngine:
         self.screen.blit(text_surf, pos)
 
     def draw_hud(self):
-        hud_bg = pygame.Surface((SCREEN_WIDTH, 60), pygame.SRCALPHA); pygame.draw.rect(hud_bg, (0, 0, 0, 80), (0, 0, SCREEN_WIDTH, 60))
+        hud_bg = pygame.Surface((SCREEN_WIDTH, 60), pygame.SRCALPHA)
+        pygame.draw.rect(hud_bg, (0, 0, 0, 80), (0, 0, SCREEN_WIDTH, 60))
         self.screen.blit(hud_bg, (0, 0))
         mini_fly = pygame.transform.scale(self.assets.fly_origin, (30, 30))
         self.screen.blit(mini_fly, (20, 15))
@@ -171,16 +314,20 @@ class GameEngine:
             pulse = 1.0 + 0.1 * math.sin(pygame.time.get_ticks() * 0.01)
             timer_surf = pygame.transform.rotozoom(self.font.render(timer_text, True, (255, 80, 80)), 0, pulse)
             self.screen.blit(timer_surf, timer_surf.get_rect(midright=(SCREEN_WIDTH - 20, 30)))
-        else: self.draw_text_with_shadow(timer_text, self.font, (255, 255, 255), (SCREEN_WIDTH - 180, 16))
+        else:
+            self.draw_text_with_shadow(timer_text, self.font, (255, 255, 255), (SCREEN_WIDTH - 180, 16))
 
     def draw_gauge(self):
         w, h, x, y = 120, 14, SCREEN_WIDTH // 2 - 60, SCREEN_HEIGHT - 35
         ratio = self.jump_height / MAX_JUMP_HEIGHT
         color = (0, 200, 0) if ratio < 0.6 else (230, 180, 0) if ratio < 0.85 else (230, 50, 50)
-        pygame.draw.rect(self.screen, (40, 40, 40), (x, y, w, h)); pygame.draw.rect(self.screen, color, (x, y, int(w * ratio), h))
+        pygame.draw.rect(self.screen, (40, 40, 40), (x, y, w, h))
+        pygame.draw.rect(self.screen, color, (x, y, int(w * ratio), h))
 
     def draw_gameover(self):
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA); overlay.fill((0, 0, 0, 160)); self.screen.blit(overlay, (0, 0))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        self.screen.blit(overlay, (0, 0))
         board_w, board_h = 500, 500
         board_x, board_y = SCREEN_WIDTH // 2 - board_w // 2, 60
         pygame.draw.rect(self.screen, (40, 30, 0, 100), (board_x + 8, board_y + 8, board_w, board_h), border_radius=25)
@@ -207,5 +354,9 @@ class GameEngine:
             self.screen.blit(status_surf, status_surf.get_rect(center=(SCREEN_WIDTH // 2, board_y + board_h - 25)))
 
     def run(self):
+        pygame.key.start_text_input()
         while True:
-            self.clock.tick(60); self.handle_events(); self.update(); self.draw()
+            self.clock.tick(60)
+            self.handle_events()
+            self.update()
+            self.draw()
